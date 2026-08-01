@@ -22,6 +22,9 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.ref }}
 
+      - name: Fetch official upstream tags
+        run: git fetch --force https://github.com/discretecoin/discrete-wallet.git "refs/tags/*:refs/tags/*"
+
       - name: Setup MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -58,7 +61,7 @@ jobs:
           VCINSTALLDIR: 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\'
         run: |
           $build_folder = "build"
-          $krb_ver = git describe --tags --always
+          $krb_ver = git describe --tags --abbrev=0
           $release_name = "Discrete-wallet-win64-${krb_ver}"
           $release_folder = "Release"
           echo "$release_name"
@@ -122,6 +125,9 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.ref }}
 
+      - name: Fetch official upstream tags
+        run: git fetch --force https://github.com/discretecoin/discrete-wallet.git "refs/tags/*:refs/tags/*"
+
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
@@ -154,7 +160,7 @@ jobs:
           Boost_INCLUDE_DIR=$BOOST_ROOT/include
           Boost_LIBRARY_DIR=$BOOST_ROOT/lib
           build_folder="build/release"
-          krb_ver=$(git describe --tags --always)
+          krb_ver=$(git describe --tags --abbrev=0)
           release_name="Discrete-wallet-macOS-$krb_ver"
           app_name="DiscreteWallet.app"
           lang_folder="/Contents/Resources/languages"
@@ -205,10 +211,13 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.ref }}
 
+      - name: Fetch official upstream tags
+        run: git fetch --force https://github.com/discretecoin/discrete-wallet.git "refs/tags/*:refs/tags/*"
+
       - name: Build deb
         id: build
         run: |
-          krb_ver=$(git describe --tags --always)
+          krb_ver=$(git describe --tags --abbrev=0)
           release_name=Discrete-wallet-linux-amd64-$krb_ver
           docker run --rm \
             -e QT_VERSION=6.8.3 \
@@ -241,10 +250,13 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.ref }}
 
+      - name: Fetch official upstream tags
+        run: git fetch --force https://github.com/discretecoin/discrete-wallet.git "refs/tags/*:refs/tags/*"
+
       - name: Build AppImage
         id: appimage
         run: |
-          krb_version=$(git describe --tags --always)
+          krb_version=$(git describe --tags --abbrev=0)
           appimage_name=Discrete-wallet-"$krb_version".AppImage
           docker run --rm \
             -e QT_VERSION=6.8.3 \
