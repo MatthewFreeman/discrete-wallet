@@ -1,1 +1,2 @@
-start cmd.exe /c %~dp0/KarbowanecWallet.exe --portable
+@echo off
+start "" "%~dp0DiscreteWallet.exe" --portable

@@ -116,6 +116,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-macos:
+    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[windows-only]') }}
     name: macOS
     runs-on: macos-15
     steps:
@@ -202,6 +203,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-linux-deb:
+    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[windows-only]') }}
     name: Linux deb
     runs-on: ubuntu-latest
     steps:
@@ -241,6 +243,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-appimage:
+    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[windows-only]') }}
     name: AppImage
     runs-on: ubuntu-latest
     steps:
