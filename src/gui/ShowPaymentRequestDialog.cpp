@@ -16,10 +16,22 @@
 
 namespace WalletGui {
 
+namespace {
+
+// Test bridge hosted from the user's fork. Keep this in one place so the
+// production URL can be switched to https://discrete.cash/pay/ after the
+// upstream page has been deployed and verified.
+const QString PAYMENT_SHARE_LINK_BASE_URL =
+  QStringLiteral("https://matthewfreeman.github.io/discrete-cash/pay/#v=1&request=");
+
+}
+
 ShowPaymentRequestDialog::ShowPaymentRequestDialog(QWidget* _parent) : QDialog(_parent), m_ui(new Ui::ShowPaymentRequestDialog) {
   m_ui->setupUi(this);
   connect(m_ui->m_showQrCodeButton, &QPushButton::clicked,
           this, &ShowPaymentRequestDialog::showQrCode);
+  connect(m_ui->m_copyShareLinkButton, &QPushButton::clicked,
+          this, &ShowPaymentRequestDialog::copyShareLink);
   connect(m_ui->m_paymentRequestUriText, &QTextBrowser::anchorClicked,
           this, [this](const QUrl&) { openPaymentRequest(); });
 }
@@ -37,6 +49,7 @@ void ShowPaymentRequestDialog::setData(const QString& _paymentRequest,
       .arg(escapedPaymentRequest, escapedPaymentRequest));
   m_ui->m_recipientStatusLabel->setText(_recipientStatus);
   m_ui->m_showQrCodeButton->setVisible(_qrAvailable);
+  m_ui->m_copyShareLinkButton->setVisible(_qrAvailable);
 
   if (_qrAvailable) {
     const int compactTextHeight = qMax(44,
@@ -66,6 +79,22 @@ void ShowPaymentRequestDialog::copyUri() {
   mimeData->setHtml(QStringLiteral("<a href=\"%1\">%2</a>")
     .arg(escapedPaymentRequest, escapedPaymentRequest));
   mimeData->setUrls({QUrl(payment_request_uri)});
+  QApplication::clipboard()->setMimeData(mimeData);
+}
+
+void ShowPaymentRequestDialog::copyShareLink() {
+  if (payment_request_uri.isEmpty() || !m_ui->m_copyShareLinkButton->isVisible()) {
+    return;
+  }
+
+  const QString shareLink = PAYMENT_SHARE_LINK_BASE_URL +
+    QString::fromLatin1(QUrl::toPercentEncoding(payment_request_uri));
+  const QString escapedShareLink = shareLink.toHtmlEscaped();
+  QMimeData* mimeData = new QMimeData();
+  mimeData->setText(shareLink);
+  mimeData->setHtml(QStringLiteral("<a href=\"%1\">%2</a>")
+    .arg(escapedShareLink, escapedShareLink));
+  mimeData->setUrls({QUrl(shareLink)});
   QApplication::clipboard()->setMimeData(mimeData);
 }
 
