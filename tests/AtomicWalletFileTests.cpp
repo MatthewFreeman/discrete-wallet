@@ -12,6 +12,7 @@
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
 #else
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
