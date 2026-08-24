@@ -8,12 +8,7 @@
 #include <QFile>
 #include <QFileInfo>
 
-#include <cstdio>
-
-#ifdef Q_OS_WIN
-#include <qt_windows.h>
-#endif
-
+#include "AtomicWalletFile.h"
 #include "WalletLegacy/WalletLegacySerializer.h"
 
 namespace WalletGui {
@@ -35,8 +30,9 @@ QStringList YubiKeyWalletFiles::bypassFiles(const QString& walletPath) {
   }
 
   // The wallet serialization version is the first varint byte and is not
-  // encrypted. Version 3 is the tracking-only protected-spend format; older
-  // or unreadable automatic files are treated as bypass candidates.
+  // encrypted. Both the backward-readable v3 format and authenticated v5
+  // format are tracking-only protected-spend wallets; standard, older, or
+  // unreadable automatic files are treated as bypass candidates.
   const auto appendIfNotProtected = [&files](const QString& path) {
     if (!QFile::exists(path)) {
       return;
@@ -45,9 +41,9 @@ QStringList YubiKeyWalletFiles::bypassFiles(const QString& walletPath) {
     char version = 0;
     const bool readVersion = file.open(QIODevice::ReadOnly) &&
         file.read(&version, 1) == 1;
-    if (!readVersion || static_cast<unsigned char>(version) !=
-                            CryptoNote::WalletLegacySerializer::
-                                PROTECTED_SPEND_VERSION) {
+    if (!readVersion ||
+        !CryptoNote::WalletLegacySerializer::isProtectedSpendVersion(
+            static_cast<unsigned char>(version))) {
       files.append(QFileInfo(path).absoluteFilePath());
     }
   };
@@ -81,19 +77,9 @@ bool YubiKeyWalletFiles::removeBypassFiles(
 
 bool YubiKeyWalletFiles::replaceFileAtomically(
     const QString& replacementPath, const QString& destinationPath) {
-  if (!QFile::exists(replacementPath)) {
-    return false;
-  }
-#ifdef Q_OS_WIN
-  return ::MoveFileExW(
-      reinterpret_cast<LPCWSTR>(replacementPath.utf16()),
-      reinterpret_cast<LPCWSTR>(destinationPath.utf16()),
-      MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
-#else
-  const QByteArray replacement = QFile::encodeName(replacementPath);
-  const QByteArray destination = QFile::encodeName(destinationPath);
-  return std::rename(replacement.constData(), destination.constData()) == 0;
-#endif
+  QString errorText;
+  return AtomicWalletFile::replacePrivateFile(
+      replacementPath, destinationPath, errorText);
 }
 
 }  // namespace WalletGui

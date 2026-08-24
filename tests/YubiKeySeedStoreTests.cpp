@@ -12,6 +12,7 @@
 
 #include "security/YubiKeySeedStore.h"
 #include "security/YubiKeyWalletFiles.h"
+#include "security/AtomicWalletFile.h"
 #include "WalletLegacy/WalletLegacySerializer.h"
 
 using WalletGui::YubiKeySeedEnvelope;
@@ -226,13 +227,13 @@ int main(int argc, char** argv) {
   if (!require(writeWalletVersionMarker(
                    fullBackupPath,
                    CryptoNote::WalletLegacySerializer::
-                       PROTECTED_SPEND_VERSION) &&
+                       LEGACY_PROTECTED_SPEND_VERSION) &&
                writeWalletVersionMarker(
                    fullTempPath,
                    CryptoNote::WalletLegacySerializer::
                        PROTECTED_SPEND_VERSION) &&
                YubiKeyWalletFiles::bypassFiles(cleanupWalletPath).isEmpty(),
-               "protected version-3 wallet copies were treated as bypass files")) {
+               "legacy or authenticated protected wallet copies were treated as bypass files")) {
     return 1;
   }
 
@@ -240,11 +241,12 @@ int main(int argc, char** argv) {
       directory.filePath(QStringLiteral("replacement.tmp"));
   const QString destinationPath =
       directory.filePath(QStringLiteral("replacement.wallet"));
-  if (!require(writeFileBytes(replacementPath,
-                              QByteArrayLiteral("protected")),
-               "atomic replacement source could not be created") ||
-      !require(writeFileBytes(destinationPath, QByteArrayLiteral("full")),
-               "atomic replacement destination could not be created")) {
+  if (!require(WalletGui::AtomicWalletFile::write(
+                   replacementPath, std::string("protected"), error),
+               "private atomic replacement source could not be created") ||
+      !require(WalletGui::AtomicWalletFile::write(
+                   destinationPath, std::string("full"), error),
+               "private atomic replacement destination could not be created")) {
     return 1;
   }
   if (!require(YubiKeyWalletFiles::replaceFileAtomically(

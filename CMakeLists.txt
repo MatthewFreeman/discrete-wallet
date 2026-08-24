@@ -643,7 +643,7 @@ if (APPLE)
 elseif (UNIX)
   target_link_libraries(${PROJECT_NAME} -lpthread)
 elseif (WIN32)
-  target_link_libraries(${PROJECT_NAME} Imm32 Iphlpapi Winmm)
+  target_link_libraries(${PROJECT_NAME} Imm32 Iphlpapi Winmm Advapi32)
 endif (APPLE)
 
 #qt5_use_modules(${PROJECT_NAME} Core Widgets Gui Network PrintSupport)
@@ -653,12 +653,32 @@ include(CTest)
 if (BUILD_TESTING)
   add_executable(YubiKeySeedStoreTests
     tests/YubiKeySeedStoreTests.cpp
+    src/security/AtomicWalletFile.cpp
     src/security/YubiKeySeedStore.cpp
     src/security/YubiKeyWalletFiles.cpp
   )
   target_include_directories(YubiKeySeedStoreTests PRIVATE src cryptonote/src ${OPENSSL_INCLUDE_DIR})
   target_link_libraries(YubiKeySeedStoreTests Qt6::Core ${OPENSSL_LIBRARIES})
+  if (WIN32)
+    target_link_libraries(YubiKeySeedStoreTests Advapi32)
+  endif()
   add_test(NAME YubiKeySeedStoreTests COMMAND YubiKeySeedStoreTests)
+  add_executable(AtomicWalletFileTests
+    tests/AtomicWalletFileTests.cpp
+    src/security/AtomicWalletFile.cpp
+  )
+  target_include_directories(AtomicWalletFileTests PRIVATE src)
+  target_link_libraries(AtomicWalletFileTests Qt6::Core)
+  if (WIN32)
+    target_link_libraries(AtomicWalletFileTests Advapi32)
+  endif()
+  add_test(NAME AtomicWalletFileTests COMMAND AtomicWalletFileTests)
+  add_executable(WalletOperationGateTests
+    tests/WalletOperationGateTests.cpp
+  )
+  target_include_directories(WalletOperationGateTests PRIVATE src)
+  target_link_libraries(WalletOperationGateTests Qt6::Core)
+  add_test(NAME WalletOperationGateTests COMMAND WalletOperationGateTests)
   if (WIN32)
     add_executable(WebAuthnPrfSmoke EXCLUDE_FROM_ALL
       tests/WebAuthnPrfSmoke.cpp

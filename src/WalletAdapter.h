@@ -7,7 +7,6 @@
 #pragma once
 
 #include <QByteArray>
-#include <QMutex>
 #include <QObject>
 #include <QTime>
 #include <QTimer>
@@ -19,6 +18,7 @@
 #include <vector>
 #include <atomic>
 #include <fstream>
+#include <sstream>
 #include <thread>
 
 #include <boost/program_options.hpp>
@@ -31,13 +31,16 @@
 #include "Wallet/SentPaymentsStore.h"
 #include "crypto_pq/PqKem.h"
 #include "crypto_pq/PqDsa.h"
+#include "security/WalletOperationGate.h"
 
 namespace WalletGui {
 
 class ITransfersContainer;
 struct YubiKeySeedMetadata;
 
-class WalletAdapter : public QObject, public CryptoNote::IWalletLegacyObserver {
+class WalletAdapter : public QObject,
+                      public CryptoNote::IWalletLegacyObserver,
+                      public Tools::IWalletRpcOperationGate {
   Q_OBJECT
   Q_DISABLE_COPY(WalletAdapter)
 
@@ -152,11 +155,18 @@ public:
   bool tryOpen(const QString& _password);
 
 private:
+  bool tryAcquireWalletRpcOperation() override;
+  void releaseWalletRpcOperation() override;
+  bool storeWalletFromRpc(const std::string& _walletFilename,
+                          std::string& _errorText) override;
+
   std::fstream m_file;
+  std::stringstream m_saveBuffer;
+  QString m_activeSavePath;
   CryptoNote::IWalletLegacy* m_wallet;
   Tools::wallet_rpc_server* m_wallet_rpc;
   std::unique_ptr<System::Dispatcher> m_rpcDispatcher;
-  QMutex m_mutex;
+  WalletOperationGate m_operationGate;
   std::atomic<bool> m_isBackupInProgress;
   std::atomic<quint64> m_saveGeneration;
   std::atomic<quint64> m_activeSaveGeneration;
@@ -221,7 +231,6 @@ private:
                                     const std::vector<CryptoNote::WalletLegacyTransfer>& _transfers,
                                     quint64 _fee, QString* _errorText);
 
-  static bool renameFile(const QString& _old_name, const QString& _new_name);
   Q_SLOT void updateBlockStatusText();
   Q_SLOT void updateBlockStatusTextWithDelay();
 

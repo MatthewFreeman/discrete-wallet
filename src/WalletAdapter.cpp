@@ -17,6 +17,7 @@
 #include <QEventLoop>
 #include <QLocale>
 #include <QStringList>
+#include <QUuid>
 #include <QVector>
 #include <QDebug>
 
@@ -52,11 +53,13 @@
 #include "CurrencyAdapter.h"
 #include "LoggerAdapter.h"
 #include "WalletLegacy/WalletLegacy.h"
+#include "WalletLegacy/WalletHelper.h"
 #include "WalletLegacy/WalletLegacySerializer.h"
 #include "Common/SecureMemory.h"
 #include "security/WindowsWebAuthnPrf.h"
 #include "security/YubiKeySeedStore.h"
 #include "security/YubiKeyWalletFiles.h"
+#include "security/AtomicWalletFile.h"
 
 #undef ERROR
 
@@ -78,7 +81,7 @@ WalletAdapter& WalletAdapter::instance() {
   return inst;
 }
 
-WalletAdapter::WalletAdapter() : QObject(), m_wallet(nullptr), m_mutex(), m_isBackupInProgress(false),
+WalletAdapter::WalletAdapter() : QObject(), m_wallet(nullptr), m_operationGate(), m_isBackupInProgress(false),
   m_saveGeneration(0), m_activeSaveGeneration(0),
   m_isResetInProgress(false), m_resetSaveGeneration(0),
   m_syncSpeed(0), m_syncPeriod(0), m_isSynchronized(false), m_newTransactionsNotificationTimer(),
@@ -515,18 +518,13 @@ bool WalletAdapter::enableYubiKeyProtection(WId _parentWindow,
   metadata.keys.append(primaryEnvelope);
 
   const QString walletPath = Settings::instance().getWalletFile();
+  const QString stageToken =
+      QUuid::createUuid().toString(QUuid::WithoutBraces);
   const QString protectedStage =
-      walletPath + QStringLiteral(".yubikey-new");
+      walletPath + QStringLiteral(".yubikey-new-") + stageToken;
   _protectedBackupPath = walletPath + QStringLiteral(".backup");
   const QString protectedBackupStage =
-      _protectedBackupPath + QStringLiteral(".yubikey-new");
-  if ((QFile::exists(protectedStage) && !QFile::remove(protectedStage)) ||
-      (QFile::exists(protectedBackupStage) &&
-       !QFile::remove(protectedBackupStage))) {
-    _errorText = tr("Could not remove a stale protected-wallet staging file. Close any program using the wallet folder and retry.");
-    _protectedBackupPath.clear();
-    return false;
-  }
+      _protectedBackupPath + QStringLiteral(".yubikey-new-") + stageToken;
 
   CryptoPQ::SeedMaster detached{};
   Tools::SecretLock scrubDetached(detached.data(), detached.size());
@@ -569,8 +567,9 @@ bool WalletAdapter::enableYubiKeyProtection(WId _parentWindow,
                         .arg(stageError));
   }
 
-  if (!QFile::copy(protectedStage, protectedBackupStage)) {
-    return rollback(tr("Could not stage the protected automatic backup."));
+  if (!saveAndWait(protectedBackupStage, true, true, true, stageError)) {
+    return rollback(tr("The protected automatic backup could not be staged: %1")
+                        .arg(stageError));
   }
   if (!verifyProtectedWalletSnapshot(
           protectedBackupStage, _walletPassword, tracking,
@@ -587,14 +586,47 @@ bool WalletAdapter::enableYubiKeyProtection(WId _parentWindow,
   // Commit only after both protected copies have been fully written and
   // reopened. The replacement is atomic on Windows/POSIX; no pre-YubiKey full
   // wallet is deliberately retained beside the active file.
-  if (!renameFile(protectedStage, walletPath)) {
-    return rollback(tr("The validated protected wallet could not replace the original wallet file."));
+  QString replaceError;
+  if (!AtomicWalletFile::replacePrivateFile(
+          protectedStage, walletPath, replaceError)) {
+    // POSIX rename is committed before the parent-directory fsync. If that
+    // final durability check reports an error, inspect the destination before
+    // deciding whether rollback is still safe.
+    QString installedValidationError;
+    if (!verifyProtectedWalletSnapshot(
+            walletPath, _walletPassword, tracking, serializedMetadata,
+            installedValidationError)) {
+      return rollback(tr("The validated protected wallet could not replace the original wallet file: %1 (destination check: %2)")
+                          .arg(replaceError, installedValidationError));
+    }
+    m_logger(Logging::WARNING)
+        << "Protected wallet replacement committed but its durability check reported: "
+        << replaceError.toStdString();
+    QFile::remove(protectedStage);
   }
 
-  if (!renameFile(protectedBackupStage, _protectedBackupPath)) {
-    _warningText = tr("The active protected wallet is valid, but its protected automatic backup could not be installed. The validated backup remains at:\n%1")
-        .arg(protectedBackupStage);
-    _protectedBackupPath = protectedBackupStage;
+  if (!AtomicWalletFile::replacePrivateFile(
+          protectedBackupStage, _protectedBackupPath, replaceError)) {
+    QString installedValidationError;
+    if (verifyProtectedWalletSnapshot(
+            _protectedBackupPath, _walletPassword, tracking,
+            serializedMetadata, installedValidationError)) {
+      m_logger(Logging::WARNING)
+          << "Protected backup replacement committed but its durability check reported: "
+          << replaceError.toStdString();
+      QFile::remove(protectedBackupStage);
+    } else {
+      _warningText = QFile::exists(protectedBackupStage)
+          ? tr("The active protected wallet is valid, but its protected automatic backup could not be installed. The validated backup remains at:\n%1")
+                .arg(protectedBackupStage)
+          : tr("The active protected wallet is valid, but its protected automatic backup could not be installed or recovered: %1")
+                .arg(replaceError);
+      if (QFile::exists(protectedBackupStage)) {
+        _protectedBackupPath = protectedBackupStage;
+      } else {
+        _protectedBackupPath.clear();
+      }
+    }
   }
   return true;
 }
@@ -700,7 +732,7 @@ bool WalletAdapter::addYubiKeyProtectionKey(WId _parentWindow,
     return false;
   }
   QString saveError;
-  if (!saveAndWait(Settings::instance().getWalletFile() + QStringLiteral(".temp"),
+  if (!saveAndWait(Settings::instance().getWalletFile(),
                    true, true, false, saveError)) {
     auto* concrete = dynamic_cast<CryptoNote::WalletLegacy*>(m_wallet);
     if (concrete != nullptr) {
@@ -853,32 +885,45 @@ void WalletAdapter::close() {
 }
 
 bool WalletAdapter::save(bool _details, bool _cache) {
-  return save(Settings::instance().getWalletFile() + ".temp", _details, _cache);
+  return save(Settings::instance().getWalletFile(), _details, _cache);
 }
 
 bool WalletAdapter::save(const QString& _file, bool _details, bool _cache,
                          quint64* _saveGeneration, bool _backupMode,
                          bool _waitForFile) {
   Q_CHECK_PTR(m_wallet);
-  if (openFile(_file, false, _waitForFile)) {
-    // Set the mode only after acquiring m_file's mutex. A preceding async save
-    // may still own the stream; changing this flag while waiting would make
-    // that preceding completion follow the wrong rename/backup path.
-    m_isBackupInProgress = _backupMode;
-    const quint64 generation = m_saveGeneration.fetch_add(1) + 1;
-    m_activeSaveGeneration.store(generation);
-    if (_saveGeneration != nullptr) {
-      *_saveGeneration = generation;
+  if (_waitForFile) {
+    lock();
+  } else if (!m_operationGate.tryAcquire()) {
+    return false;
+  }
+
+  // WalletLegacy serializes asynchronously. Keep its destination in memory so
+  // no partial or predictable filesystem object exists while keys/cache are
+  // being assembled; saveCompleted() atomically installs the finished,
+  // encrypted blob through AtomicWalletFile.
+  m_saveBuffer.str(std::string());
+  m_saveBuffer.clear();
+  m_activeSavePath = _file;
+  m_isBackupInProgress = _backupMode;
+  const quint64 generation = m_saveGeneration.fetch_add(1) + 1;
+  m_activeSaveGeneration.store(generation);
+  if (_saveGeneration != nullptr) {
+    *_saveGeneration = generation;
+  }
+  Q_EMIT walletStateChangedSignal(tr("Saving data"));
+  m_operationGate.expectSaveCompletion();
+  try {
+    m_wallet->save(m_saveBuffer, _details, _cache);
+  } catch (std::system_error&) {
+    const bool owned = m_operationGate.consumeSaveCompletion();
+    m_isBackupInProgress = false;
+    m_activeSavePath.clear();
+    m_saveBuffer.str(std::string());
+    m_saveBuffer.clear();
+    if (owned) {
+      unlock();
     }
-    Q_EMIT walletStateChangedSignal(tr("Saving data"));
-    try {
-      m_wallet->save(m_file, _details, _cache);
-    } catch (std::system_error&) {
-      m_isBackupInProgress = false;
-      closeFile();
-      return false;
-    }
-  } else {
     return false;
   }
 
@@ -1009,7 +1054,7 @@ void WalletAdapter::reset() {
 
   // Do not wait on the GUI thread if another save/backup currently owns the
   // wallet file. The operator can retry once that operation has completed.
-  if (!save(Settings::instance().getWalletFile() + ".temp", false, false,
+  if (!save(Settings::instance().getWalletFile(), false, false,
             &m_resetSaveGeneration, false, false)) {
     disconnect(m_resetSaveConnection);
     m_isResetInProgress = false;
@@ -1177,6 +1222,7 @@ void WalletAdapter::sendTransactionImpl(
   Q_CHECK_PTR(m_wallet);
   try {
     lock();
+    m_operationGate.expectSendCompletion();
     Q_EMIT walletStateChangedSignal(tr("Sending transaction"));
     // The destination string (raw PQ address or account number) is resolved
     // inside WalletLegacy::sendTransaction itself (see Wallet/PqRecipient.h);
@@ -1210,7 +1256,9 @@ void WalletAdapter::sendTransactionImpl(
     }
 
     m_logger(Logging::WARNING) << "PQ transaction could not be sent: " << _error.what();
-    unlock();
+    if (m_operationGate.consumeSendCompletion()) {
+      unlock();
+    }
     Q_EMIT walletSendTransactionCompletedSignal(
       CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID, code, walletErrorMessage(code));
     Q_EMIT updateBlockStatusTextWithDelaySignal();
@@ -1220,7 +1268,9 @@ void WalletAdapter::sendTransactionImpl(
     // through the completion observer. Surface it exactly like a completed-with-
     // error send so the Send frame reports the reason; otherwise the status bar is
     // left stuck on "Sending transaction" with nothing logged.
-    unlock();
+    if (m_operationGate.consumeSendCompletion()) {
+      unlock();
+    }
     const int code = _error.code().value();
     Q_EMIT walletSendTransactionCompletedSignal(
       CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID, code, walletErrorMessage(code));
@@ -1230,7 +1280,9 @@ void WalletAdapter::sendTransactionImpl(
     // synchronous, so without this guard a runtime_error would unwind through the
     // Qt event handler and terminate the application.
     m_logger(Logging::ERROR) << "Unexpected error while sending transaction: " << _error.what();
-    unlock();
+    if (m_operationGate.consumeSendCompletion()) {
+      unlock();
+    }
     const int code = CryptoNote::error::INTERNAL_WALLET_ERROR;
     Q_EMIT walletSendTransactionCompletedSignal(
       CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID, code,
@@ -1398,6 +1450,7 @@ void WalletAdapter::doRegisterAccountNumber(AccountRegistrationMode _mode) {
       QString transactionHash;
       try {
         lock();
+        m_operationGate.expectSendCompletion();
         const CryptoNote::TransactionId transactionId =
           m_wallet->sendTransaction(transfers, 0, std::string(extra.begin(), extra.end()), 0, 0);
 
@@ -1407,7 +1460,9 @@ void WalletAdapter::doRegisterAccountNumber(AccountRegistrationMode _mode) {
           transactionHash = QString::fromStdString(Common::podToHex(transaction.hash));
         }
       } catch (...) {
-        unlock();
+        if (m_operationGate.consumeSendCompletion()) {
+          unlock();
+        }
         throw;
       }
 
@@ -1532,7 +1587,8 @@ void WalletAdapter::runWalletRpc() {
                                               *m_wallet,
                                               *NodeAdapter::instance().getNode(),
                                               CurrencyAdapter::instance().getCurrency(),
-                                              walletFilename);
+                                              walletFilename,
+                                              this);
   if (!m_wallet_rpc->init(m_wrpcOptions))
     m_logger(Logging::ERROR) << "Failed to initialize wallet RPC server";
   bool enable_ssl;
@@ -1611,25 +1667,34 @@ void WalletAdapter::onWalletInitCompleted(int _error, const QString& _errorText)
 }
 
 void WalletAdapter::saveCompleted(std::error_code _error) {
+  if (!m_operationGate.consumeSaveCompletion()) {
+    // The embedded RPC server uses the same wallet and observer list. Its
+    // store/stop callbacks do not own this adapter's buffer or semaphore.
+    return;
+  }
   const quint64 saveGeneration = m_activeSaveGeneration.load();
   const bool backupInProgress = m_isBackupInProgress.exchange(false);
   std::error_code result = _error;
-  if (!_error && !backupInProgress) {
-    closeFile();
-    if (renameFile(Settings::instance().getWalletFile() + ".temp",
-                   Settings::instance().getWalletFile())) {
+  if (!_error) {
+    QString writeError;
+    const std::string serializedWallet = m_saveBuffer.str();
+    if (AtomicWalletFile::write(m_activeSavePath, serializedWallet, writeError)) {
+      if (!backupInProgress) {
       removeMigratedYubiKeySidecar();
       Q_EMIT walletStateChangedSignal(tr("Ready"));
       Q_EMIT updateBlockStatusTextWithDelaySignal();
+      }
     } else {
-      m_logger(Logging::ERROR) << "Wallet temp file could not replace the destination";
+      m_logger(Logging::ERROR) << "Wallet file could not be committed atomically: "
+                               << writeError.toStdString();
       result = std::make_error_code(std::errc::io_error);
     }
-  } else if (backupInProgress) {
-    closeFile();
-  } else {
-    closeFile();
   }
+
+  m_activeSavePath.clear();
+  m_saveBuffer.str(std::string());
+  m_saveBuffer.clear();
+  unlock();
 
   Q_EMIT walletSaveCompletedGenerationSignal(
       saveGeneration, result.value(), QString::fromStdString(result.message()));
@@ -1718,6 +1783,10 @@ void WalletAdapter::externalTransactionCreated(CryptoNote::TransactionId _transa
 }
 
 void WalletAdapter::sendTransactionCompleted(CryptoNote::TransactionId _transaction_id, std::error_code _error) {
+  if (!m_operationGate.consumeSendCompletion()) {
+    // Ignore completion notifications for transactions started through RPC.
+    return;
+  }
   unlock();
   Q_EMIT walletSendTransactionCompletedSignal(_transaction_id, _error.value(), walletErrorMessage(_error.value()));
   Q_EMIT updateBlockStatusTextWithDelaySignal();
@@ -1786,22 +1855,71 @@ void WalletAdapter::transactionUpdated(CryptoNote::TransactionId _transactionId)
 }
 
 void WalletAdapter::lock() {
-  m_mutex.lock();
+  m_operationGate.acquire();
 }
 
 void WalletAdapter::unlock() {
-  if (m_mutex.try_lock()) {
-    m_mutex.unlock();
-  } else {
-    m_mutex.unlock();
+  m_operationGate.release();
+}
+
+bool WalletAdapter::tryAcquireWalletRpcOperation() {
+  return m_operationGate.tryAcquire();
+}
+
+void WalletAdapter::releaseWalletRpcOperation() {
+  m_operationGate.release();
+}
+
+bool WalletAdapter::storeWalletFromRpc(const std::string& _walletFilename,
+                                       std::string& _errorText) {
+  _errorText.clear();
+  if (!m_operationGate.tryAcquire()) {
+    _errorText = "another wallet mutation is in progress; retry the RPC request";
+    return false;
   }
+  struct GateRelease {
+    WalletOperationGate& gate;
+    ~GateRelease() { gate.release(); }
+  } release{m_operationGate};
+
+  if (m_wallet == nullptr) {
+    _errorText = "the wallet is not open";
+    return false;
+  }
+
+  std::stringstream serialized;
+  CryptoNote::WalletHelper::SaveWalletResultObserver observer;
+  try {
+    CryptoNote::WalletHelper::IWalletRemoveObserverGuard guard(
+        *m_wallet, observer);
+    std::future<std::error_code> completed =
+        observer.saveResult.get_future();
+    m_wallet->save(serialized, true, true);
+    const std::error_code saveError = completed.get();
+    if (saveError) {
+      _errorText = saveError.message();
+      return false;
+    }
+  } catch (const std::exception& error) {
+    _errorText = error.what();
+    return false;
+  }
+
+  QString writeError;
+  if (!AtomicWalletFile::write(
+          QString::fromStdString(_walletFilename), serialized.str(),
+          writeError)) {
+    _errorText = writeError.toStdString();
+    return false;
+  }
+  return true;
 }
 
 bool WalletAdapter::openFile(const QString& _file, bool _readOnly,
                              bool _waitForLock) {
   if (_waitForLock) {
     lock();
-  } else if (!m_mutex.tryLock()) {
+  } else if (!m_operationGate.tryAcquire()) {
     return false;
   }
 
@@ -1830,10 +1948,6 @@ void WalletAdapter::notifyAboutLastTransaction() {
     Q_EMIT walletTransactionCreatedSignal(m_lastWalletTransactionId);
     m_lastWalletTransactionId = std::numeric_limits<quint64>::max();
   }
-}
-
-bool WalletAdapter::renameFile(const QString& _oldName, const QString& _newName) {
-  return YubiKeyWalletFiles::replaceFileAtomically(_oldName, _newName);
 }
 
 void WalletAdapter::updateBlockStatusText() {
