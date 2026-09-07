@@ -111,7 +111,8 @@ private:
   void walletOpened(bool _error, const QString& _error_text);
   void walletClosed();
   void walletRebuildCompleted(int _error, const QString& _error_text);
-  void startWalletRebuild(bool _destructive);
+  void startWalletRebuild(bool _destructive,
+                          quint32 _pqLegacyScanWindow = 0);
   void updateWalletAddress(const QString& _address);
   void reset();
   void onUriOpenSignal();
