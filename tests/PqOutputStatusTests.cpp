@@ -60,8 +60,13 @@ int main(int argc, char** argv) {
       QStringLiteral("XDS"), true);
   require(pending.tone == PqOutputStatusTone::Pending,
           "unconfirmed wallet transaction must show pending state");
-  require(pending.stateText == QStringLiteral("Waiting for confirmation"),
+  require(pending.countText == QStringLiteral("— / 32"),
+          "pending state must hide the temporary output count");
+  require(pending.stateText ==
+              QStringLiteral("Recalculating after confirmation"),
           "pending state text is wrong");
+  require(pending.toolTip.contains(QStringLiteral("count is hidden")),
+          "pending tooltip must explain why the count is hidden");
   require(!pending.consolidationRecommended,
           "pending state must not recommend another consolidation");
 

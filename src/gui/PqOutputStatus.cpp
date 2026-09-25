@@ -22,9 +22,7 @@ PqOutputStatusPresentation makePqOutputStatusPresentation(
     const QString& _formattedFee, const QString& _ticker,
     bool _hasUnconfirmedTransaction) {
   PqOutputStatusPresentation presentation;
-  presentation.countText = _ready
-      ? tr("%1 / %2").arg(_availableOutputs).arg(_inputLimit)
-      : tr("-- / %1").arg(_inputLimit);
+  presentation.countText = tr("-- / %1").arg(_inputLimit);
 
   if (!_ready) {
     presentation.stateText = tr("Available after synchronization");
@@ -33,6 +31,19 @@ PqOutputStatusPresentation makePqOutputStatusPresentation(
     return presentation;
   }
 
+  if (_hasUnconfirmedTransaction) {
+    presentation.tone = PqOutputStatusTone::Pending;
+    presentation.countText = tr("— / %1").arg(_inputLimit);
+    presentation.stateText = tr("Recalculating after confirmation");
+    presentation.toolTip = tr(
+        "The spendable PQ output count is hidden while a wallet transaction is unconfirmed. "
+        "Reserved inputs and pending wallet outputs make the intermediate number temporary. "
+        "The count will refresh when the transaction confirms or leaves the pool.");
+    return presentation;
+  }
+
+  presentation.countText =
+      tr("%1 / %2").arg(_availableOutputs).arg(_inputLimit);
   const bool usefulPlan =
       _selectedInputs > 0 && _resultingOutputs < _selectedInputs;
   presentation.consolidationRecommended =
@@ -47,16 +58,6 @@ PqOutputStatusPresentation makePqOutputStatusPresentation(
       "This wallet has %1 spendable PQ outputs. A transaction can use at most %2 inputs.")
       .arg(_availableOutputs)
       .arg(_inputLimit);
-
-  if (_hasUnconfirmedTransaction) {
-    presentation.tone = PqOutputStatusTone::Pending;
-    presentation.consolidationRecommended = false;
-    presentation.stateText = tr("Waiting for confirmation");
-    presentation.toolTip += tr(
-        "\n\nThe count excludes outputs reserved by an unconfirmed wallet transaction. "
-        "It will refresh when that transaction confirms or leaves the pool.");
-    return presentation;
-  }
 
   if (presentation.consolidationRecommended) {
     presentation.tone = PqOutputStatusTone::Attention;

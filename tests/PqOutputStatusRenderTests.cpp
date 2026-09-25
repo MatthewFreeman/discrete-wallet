@@ -136,6 +136,28 @@ int main(int argc, char** argv) {
   frame.render(&image);
   require(image.save(outputPath, "PNG"), "failed to save PQ output status render");
 
+  const WalletGui::PqOutputStatusPresentation pendingPresentation =
+      WalletGui::makePqOutputStatusPresentation(
+          true, 6, 32, 6, 2, QStringLiteral("0.01"),
+          QStringLiteral("XDS"), true);
+  const QString pendingAccent = accentFor(pendingPresentation.tone);
+  ui.m_pqOutputCountLabel->setText(pendingPresentation.countText);
+  ui.m_pqOutputCountLabel->setStyleSheet(QStringLiteral(
+      "color:%1; font-size:14px; font-weight:600;").arg(pendingAccent));
+  ui.m_pqOutputStateLabel->setText(pendingPresentation.stateText);
+  ui.m_pqOutputStateLabel->setStyleSheet(QStringLiteral(
+      "color:%1; font-size:11px;").arg(pendingAccent));
+  application.processEvents();
+  frame.layout()->activate();
+  const QString pendingOutputPath = argc > 2
+      ? QString::fromLocal8Bit(argv[2])
+      : QDir::current().filePath(QStringLiteral("PqOutputStatusPendingRender.png"));
+  QPixmap pendingImage(frame.size());
+  pendingImage.fill(Qt::transparent);
+  frame.render(&pendingImage);
+  require(pendingImage.save(pendingOutputPath, "PNG"),
+          "failed to save pending PQ output status render");
+
   ui.m_pqOutputCountLabel->setText(QStringLiteral("12345 / 32"));
   application.processEvents();
   frame.layout()->activate();
@@ -151,7 +173,7 @@ int main(int argc, char** argv) {
   const QString stateTexts[] = {
       QStringLiteral("Available after synchronization"),
       QStringLiteral("Within the transaction limit"),
-      QStringLiteral("Waiting for confirmation"),
+      QStringLiteral("Recalculating after confirmation"),
       QStringLiteral("Above limit; no reducing batch")};
   for (const QString& stateText : stateTexts) {
     ui.m_pqOutputStateLabel->setText(stateText);
