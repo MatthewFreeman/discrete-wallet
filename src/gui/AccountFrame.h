@@ -31,6 +31,9 @@ public:
   AccountFrame(QWidget* _parent);
   ~AccountFrame();
 
+Q_SIGNALS:
+  void walletOutputDetailsRequestedSignal();
+
 protected:
   bool eventFilter(QObject* _object, QEvent* _event) override;
   void changeEvent(QEvent* _event) override;

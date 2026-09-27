@@ -7,13 +7,17 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QDateTime>
+#include <QFont>
 #include <QLocale>
+#include <QPushButton>
 #include <QTabWidget>
 
 #include "NodeAdapter.h"
 #include "CryptoNoteWrapper.h"
 #include "CurrencyAdapter.h"
 #include "ConnectionsModel.h"
+#include "WalletAdapter.h"
+#include "gui/PqOutputStatus.h"
 
 #include "ui_infodialog.h"
 
@@ -21,6 +25,18 @@ namespace WalletGui {
 
 InfoDialog::InfoDialog(QWidget* _parent) : QDialog(_parent), m_ui(new Ui::InfoDialog), m_refreshTimerId(-1) {
   m_ui->setupUi(this);
+  QFont countFont = m_ui->m_walletOutputCount->font();
+  countFont.setPointSize(20);
+  countFont.setBold(true);
+  m_ui->m_walletOutputCount->setFont(countFont);
+  connect(m_ui->m_runOneMaintenanceButton, &QPushButton::clicked,
+          this, [this]() {
+            m_manualMaintenanceRequested = true;
+            accept();
+          });
+  connect(&WalletAdapter::instance(), &WalletAdapter::walletPqOutputStateUpdatedSignal,
+          this, [this]() { refreshWalletOutputs(); }, Qt::QueuedConnection);
+  refreshWalletOutputs();
   m_refreshTimerId = startTimer(1000);
   m_ui->m_connectionsView->setModel(&ConnectionsModel::instance());
   m_ui->m_connectionsView->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
@@ -50,6 +66,49 @@ InfoDialog::~InfoDialog() {
   m_refreshTimerId = -1;
 }
 
+void InfoDialog::showWalletOutputs() {
+  m_ui->tabWidget->setCurrentWidget(m_ui->m_walletTab);
+}
+
+bool InfoDialog::manualMaintenanceRequested() const {
+  return m_manualMaintenanceRequested;
+}
+
+void InfoDialog::refreshWalletOutputs() {
+  const PqOutputSnapshot snapshot = WalletAdapter::instance().pqOutputSnapshot();
+  const QString ticker = CurrencyAdapter::instance().getCurrencyTicker().toUpper();
+  const PqOutputStatusPresentation presentation = makePqOutputStatusPresentation(
+      snapshot.ready, snapshot.availableOutputs, snapshot.inputLimit,
+      snapshot.selectedInputs, snapshot.resultingOutputs,
+      CurrencyAdapter::instance().formatAmount(snapshot.fee), ticker,
+      snapshot.pending);
+
+  m_ui->m_walletOutputCount->setText(
+      snapshot.ready && !snapshot.pending
+          ? QString::number(snapshot.availableOutputs)
+          : tr("—"));
+  m_ui->m_walletInputLimit->setText(
+      tr("A transaction can use at most %1 inputs.").arg(snapshot.inputLimit));
+  m_ui->m_walletOutputState->setText(presentation.stateText);
+  if (snapshot.pending) {
+    m_ui->m_walletMaintenancePlan->setText(
+        tr("Wait for the pending wallet transaction to confirm before another step."));
+  } else if (snapshot.ready && snapshot.useful) {
+    m_ui->m_walletMaintenancePlan->setText(
+        tr("Next step: %1 input(s) → %2 output(s), each at most 10,000 XDS. Fee: %3 %4.")
+            .arg(snapshot.selectedInputs)
+            .arg(snapshot.resultingOutputs)
+            .arg(CurrencyAdapter::instance().formatAmount(snapshot.fee), ticker));
+  } else {
+    m_ui->m_walletMaintenancePlan->setText(
+        snapshot.ready ? tr("No useful maintenance step is available right now.")
+                       : tr("Output details appear after wallet synchronization."));
+  }
+  m_ui->m_runOneMaintenanceButton->setEnabled(canRunManualMaintenance(
+      snapshot.ready, snapshot.useful, snapshot.pending,
+      snapshot.inProgress));
+}
+
 void InfoDialog::onCustomContextMenu(const QPoint &point) {
   m_index = m_ui->m_connectionsView->indexAt(point);
   if (!m_index.isValid())
@@ -59,6 +118,7 @@ void InfoDialog::onCustomContextMenu(const QPoint &point) {
 
 void InfoDialog::timerEvent(QTimerEvent* _event) {
   if (_event->timerId() == m_refreshTimerId) {
+    refreshWalletOutputs();
 
     quint64 Connections = NodeAdapter::instance().getPeerCount(); // NodeAdapter::instance().getConnectionsCount();
     quint64 Outgoing =    NodeAdapter::instance().getOutgoingConnectionsCount();

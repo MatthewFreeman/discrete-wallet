@@ -31,4 +31,7 @@ PqOutputStatusPresentation makePqOutputStatusPresentation(
     const QString& _formattedFee, const QString& _ticker,
     bool _hasUnconfirmedTransaction);
 
+bool canRunManualMaintenance(bool _ready, bool _useful,
+                             bool _pending, bool _inProgress);
+
 }

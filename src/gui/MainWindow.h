@@ -155,6 +155,7 @@ private:
   Q_SLOT void verifyMessage();
   Q_SLOT void openRecent();
   Q_SLOT void showStatusInfo();
+  Q_SLOT void showWalletOutputInfo();
   Q_SLOT void openLogFile();
   Q_SLOT void toggleHidden();
   Q_SLOT void showNormalIfMinimized(bool fToggleHidden = false);

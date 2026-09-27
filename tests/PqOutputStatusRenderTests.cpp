@@ -2,188 +2,110 @@
 #include <iostream>
 
 #include <QApplication>
+#include <QDialog>
 #include <QDir>
 #include <QFontDatabase>
 #include <QFontMetrics>
 #include <QFrame>
-#include <QImage>
 #include <QLabel>
-#include <QPainter>
 #include <QPixmap>
+#include <QPushButton>
 
-#include "gui/PqOutputStatus.h"
 #include "ui_accountframe.h"
+#include "ui_infodialog.h"
 
 namespace {
 
-void require(bool _condition, const char* _message) {
-  if (!_condition) {
-    std::cerr << _message << std::endl;
+void require(bool condition, const char* message) {
+  if (!condition) {
+    std::cerr << message << std::endl;
     std::exit(1);
   }
 }
 
-QString accentFor(WalletGui::PqOutputStatusTone _tone) {
-  switch (_tone) {
-    case WalletGui::PqOutputStatusTone::Ready:
-      return QStringLiteral("#5FE29F");
-    case WalletGui::PqOutputStatusTone::Attention:
-      return QStringLiteral("#F4C95D");
-    case WalletGui::PqOutputStatusTone::Pending:
-      return QStringLiteral("#71B7FF");
-    case WalletGui::PqOutputStatusTone::Unavailable:
-      return QStringLiteral("#7F8B94");
-  }
-
-  return QStringLiteral("#7F8B94");
+QString outputPath(int argc, char** argv, int index, const char* fallback) {
+  return argc > index ? QString::fromLocal8Bit(argv[index])
+                      : QDir::current().filePath(QString::fromLatin1(fallback));
 }
 
+void render(QWidget& widget, const QString& path) {
+  QPixmap image(widget.size());
+  image.fill(Qt::transparent);
+  widget.render(&image);
+  require(image.save(path, "PNG"), "failed to save maintenance UI render");
 }
+
+}  // namespace
 
 int main(int argc, char** argv) {
   QApplication application(argc, argv);
-
 #ifdef Q_OS_WIN
-  const int uiFontId = QFontDatabase::addApplicationFont(
+  const int fontId = QFontDatabase::addApplicationFont(
       QStringLiteral("C:/Windows/Fonts/segoeui.ttf"));
-  if (uiFontId >= 0) {
-    application.setFont(QFont(QStringLiteral("Segoe UI"), 9));
-  }
+  if (fontId >= 0) application.setFont(QFont(QStringLiteral("Segoe UI"), 9));
 #endif
 
   QFrame frame;
-  Ui::AccountFrame ui;
-  ui.setupUi(&frame);
-
-  frame.setStyleSheet(QStringLiteral("QFrame#AccountFrame { background-color:#10171D; }"));
-  const QString cardCss = QStringLiteral(
-      "QFrame#%1 { background-color:#182029; border:1px solid #2A343D; border-radius:12px; }");
-  ui.m_accountNumberPanel->setStyleSheet(cardCss.arg(QStringLiteral("m_accountNumberPanel")));
-  ui.m_accountBalances->setStyleSheet(cardCss.arg(QStringLiteral("m_accountBalances")));
-  const QString captionCss = QStringLiteral(
-      "color:#7f8b94; font-size:10px; letter-spacing:1px;");
-  ui.m_accountNumberTitleLabel->setStyleSheet(captionCss);
-  ui.label->setStyleSheet(captionCss);
-  ui.m_pqOutputTitleLabel->setStyleSheet(captionCss);
-  ui.m_pqOutputSeparator->setStyleSheet(QStringLiteral(
-      "QFrame { background-color:#2A343D; border:0; min-height:1px; max-height:1px; }"));
-
-  ui.m_copyAccountNumberButton->hide();
-  ui.m_accountNumberQrButton->hide();
-  ui.m_registerAccountButton->hide();
-  ui.m_copyButton->hide();
-  ui.m_accountNumberLabel->setText(QStringLiteral("8772-1-NEVK-2"));
-  ui.m_accountNumberLabel->setStyleSheet(QStringLiteral(
-      "color:#5FE29F; font-size:23px; font-weight:600;"));
-  ui.m_addressLabel->setText(QStringLiteral("disc1q8dch...r6gekzzktr"));
-  ui.m_addressLabel->setStyleSheet(QStringLiteral(
-      "color:#9AA7B2; font-size:15px; font-weight:600;"));
-  ui.m_actualBalanceLabel->setText(QStringLiteral(
-      "<div style=\"line-height:1.15;\"><span style=\"font-size:10px; color:#7f8b94; "
-      "letter-spacing:1px;\">AVAILABLE</span><br><span style=\"font-size:22px; "
-      "font-weight:600; color:#F5F7F8;\">2719.22</span><span style=\"font-size:12px; "
-      "color:#7f8b94;\"> XDS</span></div>"));
-  ui.m_pendingBalanceLabel->setText(QStringLiteral(
-      "<span style=\"font-size:12px; color:#8a95a0;\">Locked </span>"
-      "<span style=\"font-size:12px; color:#d9e0e5;\">1999.98</span>"));
-  ui.m_totalBalanceLabel->setText(QStringLiteral(
-      "<span style=\"font-size:12px; color:#8a95a0;\">Total </span>"
-      "<span style=\"font-size:12px; color:#d9e0e5;\">4719.20</span>"));
-
-  const WalletGui::PqOutputStatusPresentation presentation =
-      WalletGui::makePqOutputStatusPresentation(
-          true, 38, 32, 32, 5, QStringLiteral("0.01"),
-          QStringLiteral("XDS"), false);
-  const QString accent = accentFor(presentation.tone);
-  ui.m_pqOutputCountLabel->setText(presentation.countText);
-  ui.m_pqOutputCountLabel->setStyleSheet(QStringLiteral(
-      "color:%1; font-size:14px; font-weight:600;").arg(accent));
-  ui.m_pqOutputStateLabel->setText(presentation.stateText);
-  ui.m_pqOutputStateLabel->setStyleSheet(QStringLiteral(
-      "color:%1; font-size:11px;").arg(accent));
-  ui.m_pqOutputPanel->setToolTip(presentation.toolTip);
-
-  // MainWindow's 250 px sidebar has 12 px margins on both sides, so the
-  // account frame is rendered at 226 px in the real application.
-  frame.resize(226, 346);
+  Ui::AccountFrame account;
+  account.setupUi(&frame);
+  account.m_pqOutputSeparator->hide();
+  account.m_pqMaintenanceButton->hide();
+  account.m_accountBalances->setMinimumHeight(118);
+  account.m_actualBalanceLabel->setText(QStringLiteral("AVAILABLE<br>2719.22 XDS"));
+  account.m_pendingBalanceLabel->setText(QStringLiteral("Locked 1999.98"));
+  account.m_totalBalanceLabel->setText(QStringLiteral("Total 4719.20"));
+  frame.resize(226, 300);
   frame.show();
   application.processEvents();
-  frame.layout()->activate();
+  require(!account.m_pqMaintenanceButton->isVisible(),
+          "healthy balance card must hide maintenance details");
+  require(frame.findChild<QLabel*>(QStringLiteral("m_pqOutputCountLabel")) == nullptr,
+          "balance card must not contain the technical output count");
+  render(frame, outputPath(argc, argv, 1, "PqOutputStatusRender.png"));
 
-  require(ui.m_accountBalances->height() >= 164,
-          "balance card must reserve room for the PQ output status");
-  require(ui.m_pqOutputPanel->geometry().bottom() <=
-              ui.m_accountBalances->contentsRect().bottom(),
-          "PQ output panel must remain inside the balance card");
-  require(QFontMetrics(ui.m_pqOutputTitleLabel->font()).horizontalAdvance(
-              ui.m_pqOutputTitleLabel->text()) <=
-              ui.m_pqOutputTitleLabel->contentsRect().width(),
-          "PQ output title must not be clipped");
-  require(QFontMetrics(ui.m_pqOutputCountLabel->font()).horizontalAdvance(
-              ui.m_pqOutputCountLabel->text()) <=
-              ui.m_pqOutputCountLabel->contentsRect().width(),
-          "PQ output count must not be clipped");
-  require(QFontMetrics(ui.m_pqOutputStateLabel->font()).horizontalAdvance(
-              ui.m_pqOutputStateLabel->text()) <=
-              ui.m_pqOutputStateLabel->contentsRect().width(),
-          "PQ output state must not be clipped");
-
-  const QString outputPath = argc > 1
-      ? QString::fromLocal8Bit(argv[1])
-      : QDir::current().filePath(QStringLiteral("PqOutputStatusRender.png"));
-  QPixmap image(frame.size());
-  image.fill(Qt::transparent);
-  frame.render(&image);
-  require(image.save(outputPath, "PNG"), "failed to save PQ output status render");
-
-  const WalletGui::PqOutputStatusPresentation pendingPresentation =
-      WalletGui::makePqOutputStatusPresentation(
-          true, 6, 32, 6, 2, QStringLiteral("0.01"),
-          QStringLiteral("XDS"), true);
-  const QString pendingAccent = accentFor(pendingPresentation.tone);
-  ui.m_pqOutputCountLabel->setText(pendingPresentation.countText);
-  ui.m_pqOutputCountLabel->setStyleSheet(QStringLiteral(
-      "color:%1; font-size:14px; font-weight:600;").arg(pendingAccent));
-  ui.m_pqOutputStateLabel->setText(pendingPresentation.stateText);
-  ui.m_pqOutputStateLabel->setStyleSheet(QStringLiteral(
-      "color:%1; font-size:11px;").arg(pendingAccent));
+  account.m_pqOutputSeparator->show();
+  account.m_pqMaintenanceButton->setText(QStringLiteral("Review output maintenance"));
+  account.m_pqMaintenanceButton->show();
+  account.m_accountBalances->setMinimumHeight(164);
+  frame.resize(226, 346);
   application.processEvents();
   frame.layout()->activate();
-  const QString pendingOutputPath = argc > 2
-      ? QString::fromLocal8Bit(argv[2])
-      : QDir::current().filePath(QStringLiteral("PqOutputStatusPendingRender.png"));
-  QPixmap pendingImage(frame.size());
-  pendingImage.fill(Qt::transparent);
-  frame.render(&pendingImage);
-  require(pendingImage.save(pendingOutputPath, "PNG"),
-          "failed to save pending PQ output status render");
+  require(account.m_pqMaintenanceButton->isVisible(),
+          "attention state must expose the maintenance entry point");
+  require(account.m_pqMaintenanceButton->geometry().bottom() <=
+              account.m_accountBalances->contentsRect().bottom(),
+          "maintenance button must fit inside the balance card");
+  require(QFontMetrics(account.m_pqMaintenanceButton->font()).horizontalAdvance(
+              account.m_pqMaintenanceButton->text()) <=
+              account.m_pqMaintenanceButton->contentsRect().width(),
+          "maintenance button text must not be clipped in the real sidebar");
+  render(frame, outputPath(argc, argv, 2, "PqOutputAttentionRender.png"));
 
-  ui.m_pqOutputCountLabel->setText(QStringLiteral("12345 / 32"));
+  QDialog dialog;
+  Ui::InfoDialog info;
+  info.setupUi(&dialog);
+  info.tabWidget->setCurrentWidget(info.m_walletTab);
+  info.m_walletOutputCount->setText(QStringLiteral("38"));
+  info.m_walletInputLimit->setText(
+      QStringLiteral("A transaction can use at most 32 inputs."));
+  info.m_walletOutputState->setText(QStringLiteral("Consolidation recommended"));
+  info.m_walletMaintenancePlan->setText(QStringLiteral(
+      "Next step: 32 input(s) -> 5 output(s), each at most 10,000 XDS. Fee: 0.01 XDS."));
+  info.m_runOneMaintenanceButton->setEnabled(true);
+  dialog.show();
   application.processEvents();
-  frame.layout()->activate();
-  require(QFontMetrics(ui.m_pqOutputTitleLabel->font()).horizontalAdvance(
-              ui.m_pqOutputTitleLabel->text()) <=
-              ui.m_pqOutputTitleLabel->contentsRect().width(),
-          "PQ output title must fit beside a five-digit output count");
-  require(QFontMetrics(ui.m_pqOutputCountLabel->font()).horizontalAdvance(
-              ui.m_pqOutputCountLabel->text()) <=
-              ui.m_pqOutputCountLabel->contentsRect().width(),
-          "five-digit PQ output count must not be clipped");
+  require(info.m_runOneMaintenanceButton->isVisible(),
+          "manual one-step action must be available from Information");
+  require(info.m_runOneMaintenanceButton->geometry().bottom() <=
+              info.m_walletTab->contentsRect().bottom(),
+          "manual action must fit inside Information's Wallet outputs tab");
+  render(dialog, outputPath(argc, argv, 3, "PqOutputInformationRender.png"));
 
-  const QString stateTexts[] = {
-      QStringLiteral("Available after synchronization"),
-      QStringLiteral("Within the transaction limit"),
-      QStringLiteral("Recalculating after confirmation"),
-      QStringLiteral("Above limit; no reducing batch")};
-  for (const QString& stateText : stateTexts) {
-    ui.m_pqOutputStateLabel->setText(stateText);
-    application.processEvents();
-    frame.layout()->activate();
-    require(QFontMetrics(ui.m_pqOutputStateLabel->font()).horizontalAdvance(
-                ui.m_pqOutputStateLabel->text()) <=
-                ui.m_pqOutputStateLabel->contentsRect().width(),
-            "PQ output state must fit the real sidebar width");
-  }
-
+  info.m_walletOutputCount->setText(QStringLiteral("—"));
+  info.m_walletOutputState->setText(
+      QStringLiteral("Recalculating after confirmation"));
+  info.m_runOneMaintenanceButton->setEnabled(false);
+  require(!info.m_runOneMaintenanceButton->isEnabled(),
+          "pending maintenance must disable another manual step");
   return 0;
 }

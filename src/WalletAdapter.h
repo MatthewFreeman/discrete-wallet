@@ -38,6 +38,19 @@ namespace WalletGui {
 class ITransfersContainer;
 struct YubiKeySeedMetadata;
 
+struct PqOutputSnapshot {
+  bool ready = false;
+  bool pending = false;
+  bool inProgress = false;
+  bool useful = false;
+  bool requiresHardwareAuthorization = false;
+  quint64 availableOutputs = 0;
+  quint64 inputLimit = 0;
+  quint64 selectedInputs = 0;
+  quint64 resultingOutputs = 0;
+  quint64 fee = 0;
+};
+
 class WalletAdapter : public QObject, public CryptoNote::IWalletLegacyObserver {
   Q_OBJECT
   Q_DISABLE_COPY(WalletAdapter)
@@ -90,6 +103,11 @@ public:
   void consolidatePqOutputs(WId _parentWindow, bool _automatic);
   void dismissPqConsolidationSuggestion();
   void reevaluatePqConsolidation();
+  // Read-only detail view and an explicit one-batch request. Unlike
+  // reevaluatePqConsolidation(), this does not clear "Not now" suppression or
+  // enable automatic maintenance.
+  PqOutputSnapshot pqOutputSnapshot();
+  QString requestManualPqConsolidation();
   QString prepareRawTransaction(const std::vector<CryptoNote::WalletLegacyTransfer>& _transfers,
                                 quint64 _fee, QString* _errorText = nullptr);
   QString prepareRawTransactionWithSeed(const CryptoPQ::SeedMaster& _seedMaster,

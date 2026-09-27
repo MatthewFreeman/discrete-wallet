@@ -21,6 +21,8 @@ public:
   InfoDialog(QWidget* _parent);
   ~InfoDialog();
   QModelIndex m_index;
+  void showWalletOutputs();
+  bool manualMaintenanceRequested() const;
 
 public slots:
   void onCustomContextMenu(const QPoint &point);
@@ -33,9 +35,11 @@ protected:
   void timerEvent(QTimerEvent* _event) Q_DECL_OVERRIDE;
 
 private:
+  void refreshWalletOutputs();
   QScopedPointer<Ui::InfoDialog> m_ui;
   QMenu* m_contextMenu;
   int m_refreshTimerId;
+  bool m_manualMaintenanceRequested = false;
 };
 
 }

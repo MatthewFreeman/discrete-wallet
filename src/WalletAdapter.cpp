@@ -1434,15 +1434,15 @@ void WalletAdapter::checkPqConsolidation() {
       return;
     }
 
-    if (!plan.useful() ||
-        plan.availableInputs <=
-            CryptoNote::parameters::MAX_PQ_INPUTS_PER_TX) {
-      return;
-    }
-
     const bool automatic =
         Settings::instance().isAutoConsolidationEnabled() &&
         !protectedSpend;
+    if (!plan.useful() ||
+        (!automatic && !plan.splitsOversizedInput &&
+         plan.availableInputs <=
+             CryptoNote::parameters::MAX_PQ_INPUTS_PER_TX)) {
+      return;
+    }
     m_consolidationPromptOutstanding = true;
     Q_EMIT walletConsolidationSuggestedSignal(
         static_cast<quint64>(plan.availableInputs),
@@ -1468,6 +1468,62 @@ void WalletAdapter::dismissPqConsolidationSuggestion() {
 
 void WalletAdapter::reevaluatePqConsolidation() {
   schedulePqConsolidationCheck(true);
+}
+
+PqOutputSnapshot WalletAdapter::pqOutputSnapshot() {
+  PqOutputSnapshot snapshot;
+  snapshot.inputLimit = CryptoNote::parameters::MAX_PQ_INPUTS_PER_TX;
+  snapshot.inProgress = m_consolidationInProgress.load();
+  if (m_wallet == nullptr || !m_isSynchronized.load() ||
+      m_isRebuildInProgress.load()) {
+    return snapshot;
+  }
+
+  auto* wallet = dynamic_cast<CryptoNote::WalletLegacy*>(m_wallet);
+  if (wallet == nullptr || !wallet->pqEnabled()) {
+    return snapshot;
+  }
+  snapshot.requiresHardwareAuthorization = isYubiKeyProtected();
+  if (wallet->isTrackingWallet() && !snapshot.requiresHardwareAuthorization) {
+    return snapshot;
+  }
+
+  try {
+    const CryptoNote::PqConsolidationPlan plan = wallet->pqConsolidationPlan();
+    snapshot.pending = wallet->pqHasUnconfirmedTransactions();
+    snapshot.availableOutputs = plan.availableInputs;
+    snapshot.selectedInputs = plan.selectedInputs;
+    snapshot.resultingOutputs = plan.resultingOutputs;
+    snapshot.fee = plan.fee;
+    snapshot.useful = plan.useful();
+    snapshot.ready = true;
+  } catch (const std::exception& error) {
+    m_logger(Logging::WARNING)
+        << "Could not read PQ output details: " << error.what();
+  }
+  return snapshot;
+}
+
+QString WalletAdapter::requestManualPqConsolidation() {
+  const PqOutputSnapshot snapshot = pqOutputSnapshot();
+  if (!snapshot.ready) {
+    return tr("Open and fully synchronize a spending wallet first.");
+  }
+  if (snapshot.pending || snapshot.inProgress) {
+    return tr("Wait for the pending wallet transaction to confirm first.");
+  }
+  if (!snapshot.useful) {
+    return tr("There is no useful output-maintenance transaction right now.");
+  }
+  if (m_consolidationPromptOutstanding.exchange(true)) {
+    return tr("An output-maintenance confirmation is already open.");
+  }
+
+  Q_EMIT walletConsolidationSuggestedSignal(
+      snapshot.availableOutputs, snapshot.selectedInputs,
+      snapshot.resultingOutputs, snapshot.fee, false,
+      snapshot.requiresHardwareAuthorization);
+  return QString();
 }
 
 void WalletAdapter::consolidatePqOutputs(WId _parentWindow, bool _automatic) {

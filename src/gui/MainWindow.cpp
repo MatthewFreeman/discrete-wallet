@@ -152,6 +152,8 @@ void MainWindow::connectToSignals() {
           this, &MainWindow::addYubiKeyProtectionKey);
   connect(m_ui->m_autoConsolidationAction, &QAction::toggled,
           this, &MainWindow::setAutoConsolidation);
+  connect(m_ui->m_accountFrame, &AccountFrame::walletOutputDetailsRequestedSignal,
+          this, &MainWindow::showWalletOutputInfo);
   connect(m_ui->m_sendFrame, &SendFrame::uriOpenSignal, this, &MainWindow::onUriOpenSignal, Qt::QueuedConnection);
   connect(m_ui->m_noWalletFrame, &NoWalletFrame::createWalletClickedSignal, this, &MainWindow::createWallet, Qt::QueuedConnection);
   connect(m_ui->m_noWalletFrame, &NoWalletFrame::openWalletClickedSignal, this, &MainWindow::openWallet, Qt::QueuedConnection);
@@ -755,6 +757,24 @@ void MainWindow::openWalletRpcSettings() {
 void MainWindow::showStatusInfo() {
   InfoDialog dlg(this);
   dlg.exec();
+  if (dlg.manualMaintenanceRequested()) {
+    const QString error = WalletAdapter::instance().requestManualPqConsolidation();
+    if (!error.isEmpty()) {
+      QMessageBox::information(this, tr("Wallet output maintenance"), error);
+    }
+  }
+}
+
+void MainWindow::showWalletOutputInfo() {
+  InfoDialog dlg(this);
+  dlg.showWalletOutputs();
+  dlg.exec();
+  if (dlg.manualMaintenanceRequested()) {
+    const QString error = WalletAdapter::instance().requestManualPqConsolidation();
+    if (!error.isEmpty()) {
+      QMessageBox::information(this, tr("Wallet output maintenance"), error);
+    }
+  }
 }
 
 void MainWindow::backupWallet() {
@@ -1516,15 +1536,18 @@ void MainWindow::showPqConsolidationSuggestion(
 
   const QString ticker =
       CurrencyAdapter::instance().getCurrencyTicker().toUpper();
+  const bool splitOversized = _selectedInputs == 1;
   QMessageBox dialog(
       QMessageBox::Warning,
-      tr("Wallet output consolidation"),
-      tr("This wallet has %1 spendable outputs. A transaction can use at most %2 inputs, so a large payment may fail even when the total balance is sufficient.")
-          .arg(_availableInputs)
-          .arg(CryptoNote::parameters::MAX_PQ_INPUTS_PER_TX),
+      tr("Wallet output maintenance"),
+      splitOversized
+          ? tr("This wallet has an output above the 10,000 XDS maintenance limit. It can be split into smaller outputs for a fee.")
+          : tr("This wallet has %1 spendable outputs. A transaction can use at most %2 inputs, so a large payment may fail even when the total balance is sufficient.")
+                .arg(_availableInputs)
+                .arg(CryptoNote::parameters::MAX_PQ_INPUTS_PER_TX),
       QMessageBox::NoButton, this);
   QString details =
-      tr("The next maintenance transaction will combine %1 inputs into %2 outputs and pay a fee of %3 %4. It sends the remaining value back to this wallet.")
+      tr("The next maintenance transaction will spend %1 input(s) and create %2 output(s), each at most 10,000 XDS. Fee: %3 %4. The remaining value returns to this wallet.")
           .arg(_selectedInputs)
           .arg(_resultingOutputs)
           .arg(CurrencyAdapter::instance().formatAmount(_fee))
@@ -1535,14 +1558,16 @@ void MainWindow::showPqConsolidationSuggestion(
           : _availableInputs;
   details += tr("\n\nEstimated after confirmation: %1 spendable outputs.")
                  .arg(estimatedOutputs);
-  details += tr("\n\nPrivacy warning: consolidation publicly links the selected outputs as controlled by the same wallet. It does not increase your balance.");
+  details += splitOversized
+      ? tr("\n\nThe original large output will remain visible in blockchain history. Splitting it does not increase your balance.")
+      : tr("\n\nPrivacy warning: consolidation publicly links the selected outputs as controlled by the same wallet. It does not increase your balance.");
   if (_requiresHardwareAuthorization) {
     details += tr("\n\nThis wallet is YubiKey protected. Automatic signing is disabled; the selected key must authorize this transaction.");
   }
   dialog.setInformativeText(details);
 
   QPushButton* consolidateButton = dialog.addButton(
-      tr("Consolidate now"), QMessageBox::AcceptRole);
+      splitOversized ? tr("Split once") : tr("Consolidate once"), QMessageBox::AcceptRole);
   QPushButton* automaticButton = nullptr;
   if (!_requiresHardwareAuthorization) {
     automaticButton = dialog.addButton(
@@ -1579,7 +1604,7 @@ void MainWindow::showPqConsolidationResult(
   }
 
   const QString summary =
-      tr("Consolidation relayed: %1 inputs became %2 outputs; fee %3 %4.")
+      tr("Wallet maintenance relayed: %1 input(s) became %2 output(s); fee %3 %4. Every new output is at most 10,000 XDS.")
           .arg(_selectedInputs)
           .arg(_resultingOutputs)
           .arg(CurrencyAdapter::instance().formatAmount(_fee))
@@ -1606,7 +1631,7 @@ void MainWindow::setAutoConsolidation(bool _on) {
 
   const QMessageBox::StandardButton answer = QMessageBox::warning(
       this, tr("Enable automatic consolidation"),
-      tr("Automatic consolidation creates fee-paying self-transactions when this wallet exceeds the per-transaction input limit. Each transaction publicly links its selected outputs as controlled by the same wallet.\n\nEnable it for this wallet file?"),
+      tr("Automatic maintenance creates fee-paying self-transactions to split outputs above 10,000 XDS and to reduce output count when useful. It runs one transaction at a time and waits for confirmation before continuing. Selected inputs become publicly linked.\n\nEnable it for this wallet file?"),
       QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
   if (answer != QMessageBox::Yes) {
     const QSignalBlocker blocker(m_ui->m_autoConsolidationAction);

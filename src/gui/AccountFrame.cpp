@@ -95,6 +95,8 @@ AccountFrame::AccountFrame(QWidget* _parent) : QFrame(_parent), m_ui(new Ui::Acc
     Qt::QueuedConnection);
   connect(&WalletAdapter::instance(), &WalletAdapter::walletPqOutputStateUpdatedSignal,
     this, &AccountFrame::updatePqOutputState, Qt::QueuedConnection);
+  connect(m_ui->m_pqMaintenanceButton, &QPushButton::clicked,
+    this, &AccountFrame::walletOutputDetailsRequestedSignal);
   connect(&WalletAdapter::instance(), &WalletAdapter::walletCloseCompletedSignal, this, &AccountFrame::reset);
   connect(&WalletAdapter::instance(), &WalletAdapter::accountRegistrationCompletedSignal, this, &AccountFrame::accountRegistrationCompleted,
     Qt::QueuedConnection);
@@ -115,6 +117,8 @@ AccountFrame::AccountFrame(QWidget* _parent) : QFrame(_parent), m_ui(new Ui::Acc
   m_ui->m_copyAccountNumberButton->setVisible(false);
   m_ui->m_accountNumberQrButton->setVisible(false);
   m_ui->m_registerAccountButton->setVisible(false);
+  m_ui->m_pqOutputSeparator->hide();
+  m_ui->m_pqMaintenanceButton->hide();
 
   QFont addressFont = QFontDatabase::systemFont(QFontDatabase::FixedFont);
   addressFont.setPixelSize(ADDRESS_FONT_SIZE);
@@ -202,9 +206,12 @@ void AccountFrame::applyFramePalette() {
   m_ui->label->setStyleSheet(captionCss);
   m_ui->m_accountNumberLabel->setStyleSheet(QStringLiteral("color:#5FE29F;"));
   m_ui->m_addressLabel->setStyleSheet(QStringLiteral("color:#9AA7B2;"));
-  m_ui->m_pqOutputTitleLabel->setStyleSheet(captionCss);
   m_ui->m_pqOutputSeparator->setStyleSheet(
     QStringLiteral("QFrame { background-color:#2A343D; border:0; min-height:1px; max-height:1px; }"));
+  m_ui->m_pqMaintenanceButton->setStyleSheet(QStringLiteral(
+    "QPushButton { color:#F4C95D; background-color:#202A32; border:1px solid #5D5030; "
+    "border-radius:7px; padding:6px; text-align:left; font-size:11px; }"
+    "QPushButton:hover { background-color:#2B363D; }"));
 }
 
 bool AccountFrame::eventFilter(QObject* _object, QEvent* _event) {
@@ -283,30 +290,16 @@ void AccountFrame::updatePqOutputState(
           _resultingOutputs, CurrencyAdapter::instance().formatAmount(_fee),
           ticker, _hasUnconfirmedTransaction);
 
-  QString accent = QStringLiteral("#7F8B94");
-  switch (presentation.tone) {
-    case PqOutputStatusTone::Ready:
-      accent = QStringLiteral("#5FE29F");
-      break;
-    case PqOutputStatusTone::Attention:
-      accent = QStringLiteral("#F4C95D");
-      break;
-    case PqOutputStatusTone::Pending:
-      accent = QStringLiteral("#71B7FF");
-      break;
-    case PqOutputStatusTone::Unavailable:
-      break;
-  }
-
-  m_ui->m_pqOutputCountLabel->setText(presentation.countText);
-  m_ui->m_pqOutputCountLabel->setStyleSheet(
-      QStringLiteral("color:%1; font-size:14px; font-weight:600;").arg(accent));
-  m_ui->m_pqOutputStateLabel->setText(presentation.stateText);
-  m_ui->m_pqOutputStateLabel->setStyleSheet(
-      QStringLiteral("color:%1; font-size:11px;").arg(accent));
-  m_ui->m_pqOutputPanel->setToolTip(presentation.toolTip);
-  m_ui->m_pqOutputCountLabel->setToolTip(presentation.toolTip);
-  m_ui->m_pqOutputStateLabel->setToolTip(presentation.toolTip);
+  const bool needsAttention = presentation.tone == PqOutputStatusTone::Attention;
+  m_ui->m_pqOutputSeparator->setVisible(needsAttention);
+  m_ui->m_pqMaintenanceButton->setVisible(needsAttention);
+  m_ui->m_accountBalances->setMinimumHeight(needsAttention ? 164 : 118);
+  setMinimumHeight(needsAttention ? 346 : 300);
+  m_ui->m_pqMaintenanceButton->setText(
+      presentation.consolidationRecommended
+          ? tr("Review output maintenance")
+          : tr("Review output limits"));
+  m_ui->m_pqMaintenanceButton->setToolTip(presentation.toolTip);
 }
 
 void AccountFrame::fetchAccountNumber(const QString& _address) {

@@ -44,10 +44,11 @@ PqOutputStatusPresentation makePqOutputStatusPresentation(
 
   presentation.countText =
       tr("%1 / %2").arg(_availableOutputs).arg(_inputLimit);
-  const bool usefulPlan =
-      _selectedInputs > 0 && _resultingOutputs < _selectedInputs;
+  const bool splitOversized = _selectedInputs == 1 && _resultingOutputs >= 1;
+  const bool usefulPlan = splitOversized ||
+      (_selectedInputs > 1 && _resultingOutputs < _selectedInputs);
   presentation.consolidationRecommended =
-      _availableOutputs > _inputLimit && usefulPlan;
+      splitOversized || (_availableOutputs > _inputLimit && usefulPlan);
   presentation.estimatedOutputsAfterConfirmation = _availableOutputs;
   if (usefulPlan && _availableOutputs >= _selectedInputs) {
     presentation.estimatedOutputsAfterConfirmation =
@@ -61,10 +62,12 @@ PqOutputStatusPresentation makePqOutputStatusPresentation(
 
   if (presentation.consolidationRecommended) {
     presentation.tone = PqOutputStatusTone::Attention;
-    presentation.stateText = tr("Consolidation recommended");
+    presentation.stateText = splitOversized
+        ? tr("Output above 10,000 XDS")
+        : tr("Consolidation recommended");
     presentation.toolTip += tr(
-        "\n\nNext consolidation: %1 inputs -> %2 outputs. "
-        "Estimated after confirmation: %3 spendable outputs. Fee: %4 %5.")
+        "\n\nNext maintenance transaction: %1 input(s) -> %2 output(s), "
+        "each no more than 10,000 XDS. Estimated after confirmation: %3 spendable outputs. Fee: %4 %5.")
         .arg(_selectedInputs)
         .arg(_resultingOutputs)
         .arg(presentation.estimatedOutputsAfterConfirmation)
@@ -84,10 +87,15 @@ PqOutputStatusPresentation makePqOutputStatusPresentation(
   }
 
   presentation.tone = PqOutputStatusTone::Ready;
-  presentation.stateText = tr("Within the transaction limit");
+  presentation.stateText = tr("No output maintenance needed");
   presentation.toolTip += tr(
       "\n\nNo consolidation is currently needed for the output count.");
   return presentation;
+}
+
+bool canRunManualMaintenance(bool _ready, bool _useful,
+                             bool _pending, bool _inProgress) {
+  return _ready && _useful && !_pending && !_inProgress;
 }
 
 }
