@@ -682,6 +682,25 @@ if (BUILD_TESTING)
   target_link_libraries(TransactionPresentationTests Qt6::Core)
   add_test(NAME TransactionPresentationTests COMMAND TransactionPresentationTests)
 
+  add_executable(PqOutputStatusTests
+    tests/PqOutputStatusTests.cpp
+    src/gui/PqOutputStatus.cpp
+  )
+  target_include_directories(PqOutputStatusTests PRIVATE src)
+  target_link_libraries(PqOutputStatusTests Qt6::Core)
+  add_test(NAME PqOutputStatusTests COMMAND PqOutputStatusTests)
+
+  add_executable(PqOutputStatusRenderTests
+    tests/PqOutputStatusRenderTests.cpp
+    src/gui/PqOutputStatus.cpp
+    ${UIS}
+  )
+  target_include_directories(PqOutputStatusRenderTests PRIVATE src ${CMAKE_BINARY_DIR})
+  target_link_libraries(PqOutputStatusRenderTests Qt6::Core Qt6::Gui Qt6::Widgets)
+  add_test(NAME PqOutputStatusRenderTests COMMAND PqOutputStatusRenderTests)
+  set_tests_properties(PqOutputStatusRenderTests PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
   add_executable(YubiKeySeedStoreTests
     tests/YubiKeySeedStoreTests.cpp
     src/security/YubiKeySeedStore.cpp

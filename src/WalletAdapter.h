@@ -257,6 +257,10 @@ Q_SIGNALS:
   void walletSynchronizationCompletedSignal(int _error, const QString& _error_text);
   void walletActualBalanceUpdatedSignal(quint64 _actual_balance);
   void walletPendingBalanceUpdatedSignal(quint64 _pending_balance);
+  void walletPqOutputStateUpdatedSignal(
+      bool _ready, quint64 _availableOutputs, quint64 _inputLimit,
+      quint64 _selectedInputs, quint64 _resultingOutputs, quint64 _fee,
+      bool _hasUnconfirmedTransaction);
   void walletTransactionCreatedSignal(CryptoNote::TransactionId _transaction_id);
   void walletSendTransactionCompletedSignal(CryptoNote::TransactionId _transaction_id, int _error, const QString& _error_text);
   void walletTransactionUpdatedSignal(CryptoNote::TransactionId _transaction_id);

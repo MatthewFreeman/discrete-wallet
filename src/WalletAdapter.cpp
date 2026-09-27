@@ -1395,9 +1395,7 @@ void WalletAdapter::schedulePqConsolidationCheck(bool _force) {
 
 void WalletAdapter::checkPqConsolidation() {
   if (m_wallet == nullptr || !m_isSynchronized.load() ||
-      m_isRebuildInProgress.load() || m_consolidationInProgress.load() ||
-      m_consolidationPromptOutstanding.load() ||
-      m_consolidationRetryBlocked.load()) {
+      m_isRebuildInProgress.load() || m_consolidationInProgress.load()) {
     return;
   }
 
@@ -1410,17 +1408,32 @@ void WalletAdapter::checkPqConsolidation() {
     return;
   }
 
-  // Never stack maintenance transactions. Waiting for confirmation gives the
-  // next plan a stable spendable set and avoids filling the pool with a chain of
-  // self-spends. This checks ledger transaction state, not the UI's broader
-  // "pending balance", which also includes immature coinbase outputs.
-  if (wallet->pqHasUnconfirmedTransactions()) {
-    return;
-  }
-
   try {
+    // Planning is read-only. Publish the current spendable-output state even
+    // when prompting is suppressed or an earlier wallet transaction is still
+    // unconfirmed, so the balance card never has to infer input pressure from
+    // the monetary balance.
     const CryptoNote::PqConsolidationPlan plan =
         wallet->pqConsolidationPlan();
+    const bool hasUnconfirmedTransaction =
+        wallet->pqHasUnconfirmedTransactions();
+    Q_EMIT walletPqOutputStateUpdatedSignal(
+        true, static_cast<quint64>(plan.availableInputs),
+        static_cast<quint64>(CryptoNote::parameters::MAX_PQ_INPUTS_PER_TX),
+        static_cast<quint64>(plan.selectedInputs),
+        static_cast<quint64>(plan.resultingOutputs), plan.fee,
+        hasUnconfirmedTransaction);
+
+    // Never stack maintenance transactions. Waiting for confirmation gives the
+    // next plan a stable spendable set and avoids filling the pool with a chain
+    // of self-spends. This checks ledger transaction state, not the UI's broader
+    // "pending balance", which also includes immature coinbase outputs.
+    if (hasUnconfirmedTransaction ||
+        m_consolidationPromptOutstanding.load() ||
+        m_consolidationRetryBlocked.load()) {
+      return;
+    }
+
     if (!plan.useful() ||
         plan.availableInputs <=
             CryptoNote::parameters::MAX_PQ_INPUTS_PER_TX) {
@@ -1437,6 +1450,10 @@ void WalletAdapter::checkPqConsolidation() {
         static_cast<quint64>(plan.resultingOutputs), plan.fee,
         automatic, protectedSpend);
   } catch (const std::exception& error) {
+    Q_EMIT walletPqOutputStateUpdatedSignal(
+        false, 0,
+        static_cast<quint64>(CryptoNote::parameters::MAX_PQ_INPUTS_PER_TX),
+        0, 0, 0, false);
     m_logger(Logging::WARNING)
         << "Could not evaluate PQ consolidation: " << error.what();
   }
@@ -1992,6 +2009,10 @@ void WalletAdapter::synchronizationProgressUpdated(uint32_t _current, uint32_t _
     m_syncSpeed = 0;
     m_syncPeriod = 0;
     m_perfData.clear();
+    Q_EMIT walletPqOutputStateUpdatedSignal(
+        false, 0,
+        static_cast<quint64>(CryptoNote::parameters::MAX_PQ_INPUTS_PER_TX),
+        0, 0, 0, false);
   }
   m_isSynchronized = false;
 

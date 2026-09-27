@@ -1529,6 +1529,12 @@ void MainWindow::showPqConsolidationSuggestion(
           .arg(_resultingOutputs)
           .arg(CurrencyAdapter::instance().formatAmount(_fee))
           .arg(ticker);
+  const quint64 estimatedOutputs =
+      _availableInputs >= _selectedInputs
+          ? _availableInputs - _selectedInputs + _resultingOutputs
+          : _availableInputs;
+  details += tr("\n\nEstimated after confirmation: %1 spendable outputs.")
+                 .arg(estimatedOutputs);
   details += tr("\n\nPrivacy warning: consolidation publicly links the selected outputs as controlled by the same wallet. It does not increase your balance.");
   if (_requiresHardwareAuthorization) {
     details += tr("\n\nThis wallet is YubiKey protected. Automatic signing is disabled; the selected key must authorize this transaction.");

@@ -62,6 +62,10 @@ private:
   void updateWalletAddress(const QString& _address);
   void updateActualBalance(quint64 _balance);
   void updatePendingBalance(quint64 _balance);
+  Q_SLOT void updatePqOutputState(
+      bool _ready, quint64 _availableOutputs, quint64 _inputLimit,
+      quint64 _selectedInputs, quint64 _resultingOutputs, quint64 _fee,
+      bool _hasUnconfirmedTransaction);
   void reset();
   void fetchAccountNumber(const QString& _address);
   void updateAccountNumberDisplay();

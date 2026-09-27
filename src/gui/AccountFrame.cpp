@@ -25,7 +25,9 @@
 #include "CurrencyAdapter.h"
 #include "Settings.h"
 #include "AccountNumber.h"
+#include "CryptoNoteConfig.h"
 #include "PqAddress.h"  // pqAccountFingerprint, decodePqAddress
+#include "PqOutputStatus.h"
 #include "QRCodeDialog.h"
 
 #include "ui_accountframe.h"
@@ -91,6 +93,8 @@ AccountFrame::AccountFrame(QWidget* _parent) : QFrame(_parent), m_ui(new Ui::Acc
     Qt::QueuedConnection);
   connect(&WalletAdapter::instance(), &WalletAdapter::walletPendingBalanceUpdatedSignal, this, &AccountFrame::updatePendingBalance,
     Qt::QueuedConnection);
+  connect(&WalletAdapter::instance(), &WalletAdapter::walletPqOutputStateUpdatedSignal,
+    this, &AccountFrame::updatePqOutputState, Qt::QueuedConnection);
   connect(&WalletAdapter::instance(), &WalletAdapter::walletCloseCompletedSignal, this, &AccountFrame::reset);
   connect(&WalletAdapter::instance(), &WalletAdapter::accountRegistrationCompletedSignal, this, &AccountFrame::accountRegistrationCompleted,
     Qt::QueuedConnection);
@@ -162,6 +166,8 @@ AccountFrame::AccountFrame(QWidget* _parent) : QFrame(_parent), m_ui(new Ui::Acc
   connect(m_ui->m_copyButton, &QToolButton::clicked, this, &AccountFrame::copyAddress);
   connect(m_ui->m_copyAccountNumberButton, &QToolButton::clicked, this, &AccountFrame::copyAccountNumber);
   connect(m_ui->m_accountNumberQrButton, &QToolButton::clicked, this, &AccountFrame::showAccountNumberQr);
+  updatePqOutputState(false, 0, CryptoNote::parameters::MAX_PQ_INPUTS_PER_TX,
+    0, 0, 0, false);
 }
 
 AccountFrame::~AccountFrame() {
@@ -196,6 +202,9 @@ void AccountFrame::applyFramePalette() {
   m_ui->label->setStyleSheet(captionCss);
   m_ui->m_accountNumberLabel->setStyleSheet(QStringLiteral("color:#5FE29F;"));
   m_ui->m_addressLabel->setStyleSheet(QStringLiteral("color:#9AA7B2;"));
+  m_ui->m_pqOutputTitleLabel->setStyleSheet(captionCss);
+  m_ui->m_pqOutputSeparator->setStyleSheet(
+    QStringLiteral("QFrame { background-color:#2A343D; border:0; min-height:1px; max-height:1px; }"));
 }
 
 bool AccountFrame::eventFilter(QObject* _object, QEvent* _event) {
@@ -261,6 +270,43 @@ void AccountFrame::updatePendingBalance(quint64 _balance) {
 
   quint64 actualBalance = WalletAdapter::instance().getActualBalance();
   m_ui->m_totalBalanceLabel->setText(formatSecondaryBalance(tr("Total"), divideAmount(_balance + actualBalance).first()));
+}
+
+void AccountFrame::updatePqOutputState(
+    bool _ready, quint64 _availableOutputs, quint64 _inputLimit,
+    quint64 _selectedInputs, quint64 _resultingOutputs, quint64 _fee,
+    bool _hasUnconfirmedTransaction) {
+  const QString ticker = CurrencyAdapter::instance().getCurrencyTicker().toUpper();
+  const PqOutputStatusPresentation presentation =
+      makePqOutputStatusPresentation(
+          _ready, _availableOutputs, _inputLimit, _selectedInputs,
+          _resultingOutputs, CurrencyAdapter::instance().formatAmount(_fee),
+          ticker, _hasUnconfirmedTransaction);
+
+  QString accent = QStringLiteral("#7F8B94");
+  switch (presentation.tone) {
+    case PqOutputStatusTone::Ready:
+      accent = QStringLiteral("#5FE29F");
+      break;
+    case PqOutputStatusTone::Attention:
+      accent = QStringLiteral("#F4C95D");
+      break;
+    case PqOutputStatusTone::Pending:
+      accent = QStringLiteral("#71B7FF");
+      break;
+    case PqOutputStatusTone::Unavailable:
+      break;
+  }
+
+  m_ui->m_pqOutputCountLabel->setText(presentation.countText);
+  m_ui->m_pqOutputCountLabel->setStyleSheet(
+      QStringLiteral("color:%1; font-size:14px; font-weight:600;").arg(accent));
+  m_ui->m_pqOutputStateLabel->setText(presentation.stateText);
+  m_ui->m_pqOutputStateLabel->setStyleSheet(
+      QStringLiteral("color:%1; font-size:11px;").arg(accent));
+  m_ui->m_pqOutputPanel->setToolTip(presentation.toolTip);
+  m_ui->m_pqOutputCountLabel->setToolTip(presentation.toolTip);
+  m_ui->m_pqOutputStateLabel->setToolTip(presentation.toolTip);
 }
 
 void AccountFrame::fetchAccountNumber(const QString& _address) {
@@ -554,6 +600,8 @@ void AccountFrame::registerAccountNumber() {
 void AccountFrame::reset() {
   updateActualBalance(0);
   updatePendingBalance(0);
+  updatePqOutputState(false, 0, CryptoNote::parameters::MAX_PQ_INPUTS_PER_TX,
+    0, 0, 0, false);
   m_address.clear();
   m_ui->m_addressLabel->clear();
   m_ui->m_addressLabel->setToolTip(tr("Your receiving address"));
